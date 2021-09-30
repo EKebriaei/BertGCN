@@ -5,7 +5,7 @@ from utils import *
 import dgl
 import torch.utils.data as Data
 from ignite.engine import Events, create_supervised_evaluator, create_supervised_trainer, Engine
-from ignite.metrics import Accuracy, Loss
+from ignite.metrics import Accuracy, Loss, Precision, Recall
 from sklearn.metrics import accuracy_score
 import numpy as np
 import os
@@ -25,7 +25,7 @@ parser.add_argument('--nb_epochs', type=int, default=50)
 parser.add_argument('--bert_init', type=str, default='roberta-base',
                     choices=['roberta-base', 'roberta-large', 'bert-base-uncased', 'bert-large-uncased'])
 parser.add_argument('--pretrained_bert_ckpt', default=None)
-parser.add_argument('--dataset', default='20ng', choices=['20ng', 'R8', 'R52', 'ohsumed', 'mr'])
+parser.add_argument('--dataset', default='20ng', choices=['20ng', 'R8', 'R52', 'ohsumed', 'mr', 'off19'])
 parser.add_argument('--checkpoint_dir', default=None, help='checkpoint directory, [bert_init]_[gcn_model]_[dataset] if not specified')
 parser.add_argument('--gcn_model', type=str, default='gcn', choices=['gcn', 'gat'])
 parser.add_argument('--gcn_layers', type=int, default=2)
@@ -238,7 +238,9 @@ def test_step(engine, batch):
 evaluator = Engine(test_step)
 metrics={
     'acc': Accuracy(),
-    'nll': Loss(th.nn.NLLLoss())
+    'nll': Loss(th.nn.NLLLoss()),
+    'precision': Precision(average=False),
+    'recall': Recall(average=False)
 }
 for n, f in metrics.items():
     f.attach(evaluator, n)
@@ -255,10 +257,16 @@ def log_training_results(trainer):
     evaluator.run(idx_loader_test)
     metrics = evaluator.state.metrics
     test_acc, test_nll = metrics["acc"], metrics["nll"]
+    test_precision, test_recall = metrics["precision"], metrics["recall"]
+    test_F1 = (test_precision * test_recall * 2 / (test_precision + test_recall)).mean()
     logger.info(
         "Epoch: {}  Train acc: {:.4f} loss: {:.4f}  Val acc: {:.4f} loss: {:.4f}  Test acc: {:.4f} loss: {:.4f}"
         .format(trainer.state.epoch, train_acc, train_nll, val_acc, val_nll, test_acc, test_nll)
     )
+    logger.info("Test precision: {} ".format(test_precision))
+    logger.info("Test recall: {} ".format(test_recall))
+    logger.info("Test F1 score: {} ".format(test_F1))
+
     if val_acc > log_training_results.best_val_acc:
         logger.info("New checkpoint")
         th.save(
